@@ -3,18 +3,20 @@ const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
 const path = require("path");
+const fs = require("fs");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 // ─── Middleware ───
-// In production, frontend is served from same origin, so allow all
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 
-// Serve static files in production
-if (process.env.NODE_ENV === "production") {
-  app.use(express.static(path.join(__dirname, "../dist")));
+// ─── Static files — always try to serve dist ───
+const distPath = path.join(__dirname, "../dist");
+const distExists = fs.existsSync(distPath);
+if (distExists) {
+  app.use(express.static(distPath));
 }
 
 // Multer for file uploads (in-memory)
@@ -216,10 +218,21 @@ app.post(
   }
 );
 
-// Catch-all for SPA in production
-if (process.env.NODE_ENV === "production") {
+// Catch-all for SPA
+if (distExists) {
   app.get("*", (req, res) => {
-    res.sendFile(path.join(__dirname, "../dist/index.html"));
+    res.sendFile(path.join(distPath, "index.html"));
+  });
+} else {
+  // Fallback if dist not found — helps debug deployment issues
+  app.get("*", (req, res) => {
+    res.status(200).json({
+      error: "Frontend build not found",
+      distPath,
+      cwd: process.cwd(),
+      dirname: __dirname,
+      files: fs.existsSync(path.join(__dirname, "..")) ? fs.readdirSync(path.join(__dirname, "..")) : "parent dir not found",
+    });
   });
 }
 
@@ -227,5 +240,7 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`\n🚀 Interviewer Fit Evaluator running on port ${PORT}`);
   console.log(`   API Key: ${process.env.ANTHROPIC_API_KEY ? "✓ configured" : "✗ MISSING"}`);
   console.log(`   SDK: ${anthropic ? "✓ loaded" : "✗ failed"}`);
-  console.log(`   Mode: ${process.env.NODE_ENV || "development"}\n`);
+  console.log(`   Mode: ${process.env.NODE_ENV || "development"}`);
+  console.log(`   Dist path: ${distPath}`);
+  console.log(`   Dist exists: ${distExists}\n`);
 });
