@@ -1,421 +1,481 @@
-import { useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 
-// ─── UI atoms ───
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
 
-const ScoreBadge = ({ score }) => {
-  const c =
-    score >= 4
-      ? { bg: "#e8f5e9", co: "#2e7d32", l: "Strong" }
-      : score >= 3
-      ? { bg: "#fff8e1", co: "#f57f17", l: "Moderate" }
-      : { bg: "#fce4ec", co: "#c62828", l: "Weak" };
-  return (
-    <span
-      style={{
-        display: "inline-flex", alignItems: "center", gap: 6,
-        padding: "3px 10px", borderRadius: 6, fontSize: 12, fontWeight: 700,
-        background: c.bg, color: c.co,
-      }}
-    >
-      {score}/5 <span style={{ fontWeight: 500 }}>{c.l}</span>
-    </span>
-  );
-};
+function getVerdictColor(verdict) {
+  if (verdict === "Strong") return "strong";
+  if (verdict === "Moderate") return "moderate";
+  if (verdict === "Weak") return "weak";
+  return "poor";
+}
 
-const VerdictBadge = ({ verdict }) => {
-  const c =
-    {
-      STRONG: { bg: "#e8f5e9", co: "#1b5e20", bd: "#a5d6a7" },
-      MODERATE: { bg: "#fff8e1", co: "#e65100", bd: "#ffe082" },
-      WEAK: { bg: "#fff3e0", co: "#bf360c", bd: "#ffcc80" },
-      POOR: { bg: "#fce4ec", co: "#b71c1c", bd: "#ef9a9a" },
-    }[verdict] || { bg: "#f5f5f5", co: "#333", bd: "#ccc" };
-  return (
-    <span
-      style={{
-        display: "inline-block", padding: "4px 14px", borderRadius: 6,
-        fontSize: 13, fontWeight: 800, letterSpacing: 1.2,
-        background: c.bg, color: c.co, border: `1.5px solid ${c.bd}`,
-      }}
-    >
-      {verdict}
-    </span>
-  );
-};
-
-const Bar = ({ score }) => {
-  const pct = (score / 5) * 100;
-  const co = score >= 4 ? "#43a047" : score >= 3 ? "#fb8c00" : "#e53935";
-  return (
-    <div style={{ width: "100%", height: 6, borderRadius: 3, background: "#1a1a2e", overflow: "hidden" }}>
-      <div style={{ width: `${pct}%`, height: "100%", borderRadius: 3, background: co, transition: "width 0.8s ease" }} />
-    </div>
-  );
-};
-
-// ─── Main App ───
+function formatTime() {
+  return new Date().toLocaleTimeString("en-US", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
 
 export default function App() {
   const [jdFiles, setJdFiles] = useState([]);
-  const [profileFiles, setProfileFiles] = useState([]);
-  const [results, setResults] = useState([]);
-  const [activeIdx, setActiveIdx] = useState(0);
-  const [activeJd, setActiveJd] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [progress, setProgress] = useState("");
-  const [error, setError] = useState("");
-  const [showResults, setShowResults] = useState(false);
-  const [serverOk, setServerOk] = useState(null);
+  const [interviewerFiles, setInterviewerFiles] = useState([]);
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [progressLog, setProgressLog] = useState([]);
+  const [results, setResults] = useState(null);
+  const [parsedJDs, setParsedJDs] = useState(null);
+  const [streamResults, setStreamResults] = useState([]);
+  const [hasEvaluated, setHasEvaluated] = useState(false);
 
-  // Check server health on first render
-  useState(() => {
-    fetch("/api/health")
-      .then((r) => r.json())
-      .then((d) => setServerOk(d.hasApiKey))
-      .catch(() => setServerOk(false));
-  });
+  const jdInputRef = useRef(null);
+  const intInputRef = useRef(null);
+  const logEndRef = useRef(null);
 
-  const handleJdChange = (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length > 0) setJdFiles((prev) => [...prev, ...files].slice(0, 5));
+  // Auto-scroll progress log
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [progressLog]);
+
+  const addLog = useCallback((msg) => {
+    setProgressLog((prev) => [...prev, { time: formatTime(), msg }]);
+  }, []);
+
+  // File handlers
+  const handleJDFiles = (e) => {
+    const files = Array.from(e.target.files);
+    setJdFiles((prev) => [...prev, ...files].slice(0, 5));
     e.target.value = "";
   };
 
-  const handleProfileChange = (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length > 0) setProfileFiles((prev) => [...prev, ...files].slice(0, 10));
+  const handleInterviewerFiles = (e) => {
+    const files = Array.from(e.target.files);
+    setInterviewerFiles((prev) => [...prev, ...files].slice(0, 10));
     e.target.value = "";
   };
 
-  const removeJd = (i) => setJdFiles((prev) => prev.filter((_, j) => j !== i));
-  const removeProfile = (i) => setProfileFiles((prev) => prev.filter((_, j) => j !== i));
+  const removeJD = (idx) => {
+    setJdFiles((prev) => prev.filter((_, i) => i !== idx));
+  };
 
-  // ─── Evaluation via backend ───
-  const runEvaluation = async () => {
-    if (jdFiles.length === 0 || profileFiles.length === 0) {
-      setError("Upload at least one JD and one interviewer profile.");
-      return;
+  const removeInterviewer = (idx) => {
+    setInterviewerFiles((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  // Main evaluate function
+  const handleEvaluate = async () => {
+    if (jdFiles.length === 0 && !parsedJDs) return;
+    if (interviewerFiles.length === 0) return;
+
+    setIsEvaluating(true);
+    setProgressLog([]);
+    setStreamResults([]);
+    setResults(null);
+    addLog("Starting evaluation pipeline...");
+
+    const formData = new FormData();
+
+    // If we have previously parsed JDs, send them
+    if (parsedJDs) {
+      formData.append("parsedJDs", JSON.stringify(parsedJDs));
     }
-    setError("");
-    setLoading(true);
-    setShowResults(false);
 
-    const newResults = [...results];
-    const startIdx = newResults.length;
+    // Add new JD files
+    for (const file of jdFiles) {
+      formData.append("jds", file);
+    }
 
-    for (let p = 0; p < profileFiles.length; p++) {
-      const pf = profileFiles[p];
-      setProgress(`Evaluating interviewer ${p + 1}/${profileFiles.length}: ${pf.name}...`);
+    for (const file of interviewerFiles) {
+      formData.append("interviewers", file);
+    }
 
-      try {
-        const formData = new FormData();
-        // Add all JDs
-        for (const jd of jdFiles) {
-          formData.append("jds", jd);
+    try {
+      const response = await fetch("/api/evaluate", {
+        method: "POST",
+        body: formData,
+      });
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const jsonStr = line.slice(6);
+          if (!jsonStr.trim()) continue;
+
+          try {
+            const event = JSON.parse(jsonStr);
+
+            switch (event.type) {
+              case "progress":
+                addLog(event.message);
+                break;
+
+              case "jds_parsed":
+                addLog(
+                  `JDs parsed: ${event.jds.map((j) => `${j.filename} (${j.jdProfile}, ${j.mustHaveCount} must-have, ${j.goodToHaveCount} good-to-have)`).join("; ")}`
+                );
+                break;
+
+              case "interviewer_complete":
+                addLog(
+                  `✓ ${event.result.interviewerName} complete — ${event.result.jdResults.map((r) => `${r.verdict} ${r.overallPercentage}%`).join(", ")}`
+                );
+                setStreamResults((prev) => [...prev, event.result]);
+                break;
+
+              case "interviewer_error":
+                addLog(`✗ Error processing ${event.filename}: ${event.error}`);
+                setStreamResults((prev) => [
+                  ...prev,
+                  {
+                    interviewerFile: event.filename,
+                    interviewerName: "Error",
+                    error: event.error,
+                    jdResults: [],
+                    profiles: [],
+                  },
+                ]);
+                break;
+
+              case "complete":
+                addLog("Evaluation complete.");
+                setResults(event.results);
+                setParsedJDs(event.parsedJDs);
+                setHasEvaluated(true);
+                break;
+
+              case "error":
+                addLog(`Error: ${event.message}`);
+                break;
+            }
+          } catch (e) {
+            // Ignore parse errors in stream
+          }
         }
-        // Add this profile
-        formData.append("profile", pf);
-
-        const resp = await fetch("/api/evaluate", {
-          method: "POST",
-          body: formData,
-        });
-
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || `Server error ${resp.status}`);
-
-        newResults.push({ file: pf.name, result: data.result, error: null });
-      } catch (err) {
-        newResults.push({ file: pf.name, result: null, error: err.message });
       }
-      setResults([...newResults]);
+    } catch (err) {
+      addLog(`Fatal error: ${err.message}`);
     }
 
-    setActiveIdx(startIdx);
-    setActiveJd(0);
-    setProfileFiles([]);
-    setShowResults(true);
-    setLoading(false);
-    setProgress("");
+    setIsEvaluating(false);
   };
 
-  const resetAll = () => {
-    setJdFiles([]); setProfileFiles([]); setResults([]); setShowResults(false);
-    setActiveIdx(0); setActiveJd(0); setError(""); setProgress("");
+  // Evaluate More: keep JDs, clear interviewers
+  const handleEvaluateMore = () => {
+    setInterviewerFiles([]);
+    setStreamResults([]);
+    setResults(null);
+    setProgressLog([]);
+    // Keep parsedJDs and jdFiles
   };
 
-  const cur = results[activeIdx];
+  // Start Fresh: reset everything
+  const handleStartFresh = () => {
+    setJdFiles([]);
+    setInterviewerFiles([]);
+    setResults(null);
+    setParsedJDs(null);
+    setStreamResults([]);
+    setProgressLog([]);
+    setHasEvaluated(false);
+  };
+
+  const displayResults = results || (streamResults.length > 0 ? streamResults : null);
 
   return (
-    <div style={{ minHeight: "100vh" }}>
-      {/* Header */}
-      <div style={{ padding: "20px 28px 14px", borderBottom: "1px solid #1a1a35", background: "linear-gradient(135deg, #0c0c1d, #141432)" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", maxWidth: 980, margin: "0 auto" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <div style={{ width: 34, height: 34, borderRadius: 10, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 700, color: "#fff", fontFamily: "'Space Mono', monospace" }}>iv</div>
-            <div>
-              <h1 style={{ fontSize: 19, fontWeight: 700, color: "#f0f0f0", fontFamily: "'Space Mono', monospace" }}>Interviewer Fit Evaluator</h1>
-              <p style={{ fontSize: 11, color: "#555" }}>Intervue.io Supply Ops — AI-powered interviewer-JD matching</p>
-            </div>
+    <div className="app-container">
+      <header className="app-header">
+        <h1>
+          Interviewer Fit Evaluator
+          <span className="version-badge">v2.0</span>
+        </h1>
+        <p>
+          Powered by Intervue.io CV Parser pipeline — 13-step skill extraction with
+          profile-aware semantic matching
+        </p>
+      </header>
+
+      {/* Upload Section */}
+      <div className="upload-section">
+        {/* JD Upload */}
+        <div className="upload-card">
+          <h2>Job Descriptions</h2>
+          <p className="upload-subtitle">
+            Upload up to 5 JDs (.pdf, .txt, .docx)
+            {parsedJDs && (
+              <span style={{ color: "var(--strong)", marginLeft: 8 }}>
+                — {parsedJDs.length} JD{parsedJDs.length > 1 ? "s" : ""} already
+                parsed
+              </span>
+            )}
+          </p>
+
+          <div
+            className={`file-drop-zone ${jdFiles.length > 0 || parsedJDs ? "has-files" : ""}`}
+            onClick={() => jdInputRef.current?.click()}
+          >
+            <input
+              ref={jdInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.txt,.docx"
+              onChange={handleJDFiles}
+            />
+            {jdFiles.length === 0 && !parsedJDs ? (
+              <p>Click to upload JD files</p>
+            ) : (
+              <p>Click to add more JDs</p>
+            )}
           </div>
-          {serverOk !== null && (
-            <span style={{ fontSize: 11, color: serverOk ? "#66bb6a" : "#ef5350" }}>
-              {serverOk ? "● Server connected" : "● Server not connected"}
-            </span>
+
+          {/* Previously parsed JDs */}
+          {parsedJDs && (
+            <div className="file-list">
+              {parsedJDs.map((jd, i) => (
+                <div key={`parsed-${i}`} className="file-item">
+                  <span className="file-name">✓ {jd.filename}</span>
+                  <span className="file-size">
+                    {jd.jdProfile} · {jd.mustHaveCount}M / {jd.goodToHaveCount}G
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* New JD files */}
+          {jdFiles.length > 0 && (
+            <div className="file-list">
+              {jdFiles.map((file, i) => (
+                <div key={i} className="file-item">
+                  <span className="file-name">{file.name}</span>
+                  <span className="file-size">{formatFileSize(file.size)}</span>
+                  <button className="remove-btn" onClick={() => removeJD(i)}>
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Interviewer Upload */}
+        <div className="upload-card">
+          <h2>Interviewer Profiles</h2>
+          <p className="upload-subtitle">
+            Upload up to 10 CVs / LinkedIn PDFs (.pdf, .txt, .docx)
+          </p>
+
+          <div
+            className={`file-drop-zone ${interviewerFiles.length > 0 ? "has-files" : ""}`}
+            onClick={() => intInputRef.current?.click()}
+          >
+            <input
+              ref={intInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.txt,.docx"
+              onChange={handleInterviewerFiles}
+            />
+            {interviewerFiles.length === 0 ? (
+              <p>Click to upload interviewer CVs</p>
+            ) : (
+              <p>Click to add more interviewers</p>
+            )}
+          </div>
+
+          {interviewerFiles.length > 0 && (
+            <div className="file-list">
+              {interviewerFiles.map((file, i) => (
+                <div key={i} className="file-item">
+                  <span className="file-name">{file.name}</span>
+                  <span className="file-size">{formatFileSize(file.size)}</span>
+                  <button
+                    className="remove-btn"
+                    onClick={() => removeInterviewer(i)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </div>
 
-      <div style={{ maxWidth: 980, margin: "0 auto", padding: "20px 20px 60px" }}>
-        {/* ═══ UPLOAD SECTION ═══ */}
-        {!showResults && (
-          <div style={{ animation: "slideUp 0.3s ease" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
-              {/* JDs */}
-              <div style={{ background: "#12122a", border: "1px solid #1e1e40", borderRadius: 14, padding: 20 }}>
-                <h2 style={{ fontSize: 14, fontWeight: 700, color: "#c4b5fd", fontFamily: "'Space Mono', monospace", marginBottom: 4 }}>Job Descriptions</h2>
-                <p style={{ fontSize: 11, color: "#555", marginBottom: 14 }}>Up to 5 files (.pdf, .txt, .docx)</p>
-                <div className="upload-zone" style={{ marginBottom: jdFiles.length > 0 ? 10 : 0 }}>
-                  <input type="file" multiple accept=".pdf,.txt,.docx,.doc" onChange={handleJdChange} />
-                  <p style={{ fontSize: 12, color: "#666" }}>📄 {jdFiles.length === 0 ? "Click to select JDs" : "+ Add more JDs"}</p>
-                </div>
-                {jdFiles.length > 0 && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {jdFiles.map((f, i) => (
-                      <div key={`jd-${i}-${f.name}`} className="file-chip">
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                          <span style={{ width: 20, height: 20, borderRadius: 5, background: "#6366f120", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#a5b4fc", fontWeight: 700, flexShrink: 0 }}>{i + 1}</span>
-                          <span className="name">{f.name}</span>
-                          <span className="size">({(f.size / 1024).toFixed(0)}KB)</span>
-                        </div>
-                        <button className="rm" onClick={() => removeJd(i)}>×</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+      {/* Action Buttons */}
+      <div className="button-row">
+        <button
+          className="btn-primary"
+          disabled={
+            isEvaluating ||
+            (jdFiles.length === 0 && !parsedJDs) ||
+            interviewerFiles.length === 0
+          }
+          onClick={handleEvaluate}
+        >
+          {isEvaluating && <span className="spinner" />}
+          {isEvaluating ? "Evaluating..." : "Evaluate Fit"}
+        </button>
 
-              {/* Profiles */}
-              <div style={{ background: "#12122a", border: "1px solid #1e1e40", borderRadius: 14, padding: 20 }}>
-                <h2 style={{ fontSize: 14, fontWeight: 700, color: "#c4b5fd", fontFamily: "'Space Mono', monospace", marginBottom: 4 }}>Interviewer Profiles</h2>
-                <p style={{ fontSize: 11, color: "#555", marginBottom: 14 }}>Up to 10 CVs / LinkedIn PDFs</p>
-                <div className="upload-zone" style={{ marginBottom: profileFiles.length > 0 ? 10 : 0 }}>
-                  <input type="file" multiple accept=".pdf,.txt,.docx,.doc" onChange={handleProfileChange} />
-                  <p style={{ fontSize: 12, color: "#666" }}>👤 {profileFiles.length === 0 ? "Click to select profiles" : "+ Add more profiles"}</p>
-                </div>
-                {profileFiles.length > 0 && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {profileFiles.map((f, i) => (
-                      <div key={`pf-${i}-${f.name}`} className="file-chip">
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                          <span style={{ width: 20, height: 20, borderRadius: 5, background: "#8b5cf620", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#c4b5fd", fontWeight: 700, flexShrink: 0 }}>{i + 1}</span>
-                          <span className="name">{f.name}</span>
-                          <span className="size">({(f.size / 1024).toFixed(0)}KB)</span>
-                        </div>
-                        <button className="rm" onClick={() => removeProfile(i)}>×</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Status */}
-            <div style={{ fontSize: 12, color: "#555", marginBottom: 12, display: "flex", gap: 16 }}>
-              <span>{jdFiles.length} JD{jdFiles.length !== 1 ? "s" : ""} selected</span>
-              <span>{profileFiles.length} interviewer{profileFiles.length !== 1 ? "s" : ""} selected</span>
-              {results.length > 0 && <span style={{ color: "#66bb6a" }}>✓ {results.length} previously evaluated</span>}
-            </div>
-
-            {/* Actions */}
-            <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={runEvaluation} disabled={jdFiles.length === 0 || profileFiles.length === 0 || loading}
-                style={{
-                  flex: 1, padding: "14px 24px", borderRadius: 12, border: "none",
-                  background: (jdFiles.length > 0 && profileFiles.length > 0 && !loading) ? "linear-gradient(135deg, #6366f1, #8b5cf6)" : "#1e1e40",
-                  color: (jdFiles.length > 0 && profileFiles.length > 0) ? "#fff" : "#555",
-                  fontSize: 14, fontWeight: 700, cursor: loading ? "wait" : "pointer",
-                  fontFamily: "'Space Mono', monospace", opacity: loading ? 0.7 : 1, transition: "all 0.3s",
-                }}>
-                {loading ? progress : `Evaluate ${profileFiles.length} Interviewer${profileFiles.length !== 1 ? "s" : ""} against ${jdFiles.length} JD${jdFiles.length !== 1 ? "s" : ""} →`}
-              </button>
-              {results.length > 0 && (
-                <button onClick={() => setShowResults(true)} style={{
-                  padding: "14px 20px", borderRadius: 12, border: "1px solid #6366f1",
-                  background: "transparent", color: "#a5b4fc", fontSize: 13, fontWeight: 600,
-                  cursor: "pointer", fontFamily: "'Space Mono', monospace",
-                }}>View Results ({results.length})</button>
-              )}
-            </div>
-
-            {error && (
-              <div style={{ marginTop: 12, padding: "12px 16px", background: "#2d1020", borderRadius: 10, border: "1px solid #5c2030", fontSize: 13, color: "#ef9a9a" }}>{error}</div>
-            )}
-
-            {loading && (
-              <div style={{ marginTop: 14, padding: "12px 16px", background: "#1a1a38", borderRadius: 10, border: "1px solid #252550" }}>
-                <div style={{ width: "100%", height: 4, borderRadius: 2, background: "#0e0e22", marginBottom: 8, overflow: "hidden" }}>
-                  <div style={{ height: "100%", borderRadius: 2, background: "linear-gradient(90deg, #6366f1, #8b5cf6)", transition: "width 0.5s ease", width: "30%" }} />
-                </div>
-                <p style={{ textAlign: "center", animation: "pulse 1.5s ease infinite", fontSize: 12, color: "#a5b4fc" }}>{progress}</p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ═══ RESULTS ═══ */}
-        {showResults && results.length > 0 && (
-          <div style={{ animation: "slideUp 0.3s ease" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                <span style={{ fontSize: 12, color: "#6366f1", fontWeight: 600 }}>📄 {jdFiles.length} JD{jdFiles.length !== 1 ? "s" : ""}</span>
-                <span style={{ color: "#2a2a50" }}>|</span>
-                <span style={{ fontSize: 12, color: "#8b5cf6", fontWeight: 600 }}>👤 {results.length} evaluated</span>
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => setShowResults(false)} style={{ padding: "6px 14px", borderRadius: 8, border: "1px solid #6366f1", background: "transparent", color: "#a5b4fc", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>+ Evaluate More</button>
-                <button onClick={resetAll} style={{ padding: "6px 14px", borderRadius: 8, border: "1px solid #ef5350", background: "transparent", color: "#ef9a9a", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Start Fresh</button>
-              </div>
-            </div>
-
-            {/* Interviewer cards */}
-            <div style={{ display: "flex", gap: 8, marginBottom: 20, overflowX: "auto", paddingBottom: 4 }}>
-              {results.map((r, i) => {
-                const active = i === activeIdx;
-                const name = r.result?.interviewer?.name || r.file.replace(/\.[^.]+$/, "");
-                const avg = r.result ? (r.result.evaluations.reduce((a, e) => a + e.overallScore, 0) / r.result.evaluations.length).toFixed(1) : null;
-                const best = r.result ? r.result.evaluations.reduce((b, e) => {
-                  const o = { STRONG: 4, MODERATE: 3, WEAK: 2, POOR: 1 };
-                  return (o[e.verdict] || 0) > (o[b] || 0) ? e.verdict : b;
-                }, "POOR") : null;
-                return (
-                  <button key={i} onClick={() => { setActiveIdx(i); setActiveJd(0); }} style={{
-                    minWidth: 170, padding: "12px 14px", borderRadius: 12,
-                    border: `1.5px solid ${active ? "#6366f1" : "#1e1e40"}`,
-                    background: active ? "#1a1040" : "#12122a",
-                    cursor: "pointer", textAlign: "left", flexShrink: 0,
-                  }}>
-                    <p style={{ fontSize: 12, fontWeight: 700, color: active ? "#e0e0f0" : "#888", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</p>
-                    {r.error ? <span style={{ fontSize: 11, color: "#ef5350" }}>Error</span> : (
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 17, fontWeight: 800, color: avg >= 4 ? "#43a047" : avg >= 3 ? "#fb8c00" : "#e53935" }}>{avg}</span>
-                        <span style={{ fontSize: 10, color: "#555" }}>avg</span>
-                        {best && <VerdictBadge verdict={best} />}
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            {cur?.error && (
-              <div style={{ padding: "14px 18px", background: "#2d1020", borderRadius: 12, border: "1px solid #5c2030", marginBottom: 20 }}>
-                <p style={{ fontSize: 13, color: "#ef9a9a" }}>Failed: {cur.error}</p>
-              </div>
-            )}
-
-            {cur?.result && (() => {
-              const r = cur.result;
-              return (
-                <>
-                  <div style={{ background: "linear-gradient(135deg, #1a1040, #12122a)", border: "1px solid #2a2060", borderRadius: 14, padding: 22, marginBottom: 18 }}>
-                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
-                      <div>
-                        <p style={{ fontSize: 10, color: "#8b5cf6", fontWeight: 700, letterSpacing: 1.5, marginBottom: 4 }}>INTERVIEWER</p>
-                        <h2 style={{ fontSize: 20, fontWeight: 700, color: "#f0f0f0", marginBottom: 2 }}>{r.interviewer.name}</h2>
-                        <p style={{ fontSize: 12, color: "#888" }}>{r.interviewer.currentRole}</p>
-                        <p style={{ fontSize: 11, color: "#666", marginTop: 2 }}>{r.interviewer.totalExperience}</p>
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <p style={{ fontSize: 10, color: "#6366f1", fontWeight: 600, marginBottom: 3 }}>PRIMARY</p>
-                        <p style={{ fontSize: 11, color: "#c4b5fd", background: "#6366f115", padding: "3px 8px", borderRadius: 5, display: "inline-block", marginBottom: 5 }}>{r.interviewer.primaryProfile}</p>
-                        <p style={{ fontSize: 10, color: "#6366f1", fontWeight: 600, marginBottom: 3 }}>SECONDARY</p>
-                        <p style={{ fontSize: 11, color: "#c4b5fd", background: "#6366f115", padding: "3px 8px", borderRadius: 5, display: "inline-block" }}>{r.interviewer.secondaryProfile}</p>
-                      </div>
-                    </div>
-                    {r.interviewer.coreStrengths && (
-                      <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 5 }}>
-                        {r.interviewer.coreStrengths.map((s, i) => (
-                          <span key={i} style={{ padding: "2px 8px", borderRadius: 16, fontSize: 10, background: "#1e1e40", color: "#a0a0c0", border: "1px solid #2a2a50" }}>{s}</span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div style={{ display: "flex", gap: 4, marginBottom: 2, overflowX: "auto" }}>
-                    {r.evaluations.map((ev, i) => (
-                      <button key={i} onClick={() => setActiveJd(i)} style={{
-                        padding: "8px 16px", borderRadius: "8px 8px 0 0", border: "1px solid",
-                        borderBottom: "none", fontSize: 11, fontWeight: 600, cursor: "pointer",
-                        fontFamily: "'Space Mono', monospace", whiteSpace: "nowrap",
-                        background: activeJd === i ? "#12122a" : "transparent",
-                        borderColor: activeJd === i ? "#1e1e40" : "transparent",
-                        color: activeJd === i ? "#c4b5fd" : "#555",
-                      }}>
-                        JD {i + 1}: {ev.jdTitle?.slice(0, 26)}{ev.jdTitle?.length > 26 ? "…" : ""}
-                      </button>
-                    ))}
-                  </div>
-
-                  {r.evaluations[activeJd] && (() => {
-                    const ev = r.evaluations[activeJd];
-                    return (
-                      <div style={{ background: "#12122a", border: "1px solid #1e1e40", borderRadius: "0 12px 12px 12px", padding: 22, marginBottom: 18 }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, flexWrap: "wrap", gap: 10 }}>
-                          <div>
-                            <h3 style={{ fontSize: 16, fontWeight: 700, color: "#e0e0e0" }}>{ev.jdTitle}</h3>
-                            <p style={{ fontSize: 11, color: "#666", marginTop: 2 }}>{ev.company}</p>
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <span style={{ fontSize: 26, fontWeight: 800, color: ev.overallScore >= 4 ? "#43a047" : ev.overallScore >= 3 ? "#fb8c00" : "#e53935" }}>
-                              {ev.overallScore}<span style={{ fontSize: 13, color: "#555" }}>/5</span>
-                            </span>
-                            <VerdictBadge verdict={ev.verdict} />
-                          </div>
-                        </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 18 }}>
-                          {ev.scores?.map((s, i) => (
-                            <div key={i} style={{ padding: "10px 14px", background: "#0e0e22", borderRadius: 9, border: "1px solid #1a1a35" }}>
-                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
-                                <span style={{ fontSize: 12, fontWeight: 600, color: "#c0c0d0" }}>{s.requirement}</span>
-                                <ScoreBadge score={s.score} />
-                              </div>
-                              <Bar score={s.score} />
-                              <p style={{ fontSize: 11, color: "#777", marginTop: 5, lineHeight: 1.5 }}>{s.assessment}</p>
-                            </div>
-                          ))}
-                        </div>
-                        <div style={{ padding: "12px 16px", background: "#0e0e22", borderRadius: 9, border: "1px solid #1a1a35", marginBottom: 10 }}>
-                          <p style={{ fontSize: 10, color: "#6366f1", fontWeight: 700, letterSpacing: 1, marginBottom: 5 }}>SUMMARY</p>
-                          <p style={{ fontSize: 12, color: "#aaa", lineHeight: 1.6 }}>{ev.summary}</p>
-                        </div>
-                        {ev.canInterviewFor && (
-                          <div style={{ padding: "12px 16px", background: "#101028", borderRadius: 9, border: "1px solid #1e1e40" }}>
-                            <p style={{ fontSize: 10, color: "#8b5cf6", fontWeight: 700, letterSpacing: 1, marginBottom: 5 }}>CAN INTERVIEW FOR</p>
-                            <p style={{ fontSize: 12, color: "#aaa", lineHeight: 1.6 }}>{ev.canInterviewFor}</p>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  <div style={{ background: "linear-gradient(135deg, #0e1a0e, #12122a)", border: "1px solid #1e3a1e", borderRadius: 14, padding: 22, marginBottom: 18 }}>
-                    <p style={{ fontSize: 10, color: "#66bb6a", fontWeight: 700, letterSpacing: 1.5, marginBottom: 6 }}>RECOMMENDATION</p>
-                    <p style={{ fontSize: 13, color: "#c0c0d0", lineHeight: 1.7 }}>{r.recommendation}</p>
-                  </div>
-
-                  {r.idealInterviewerProfile && (
-                    <div style={{ background: "#12122a", border: "1px solid #1e1e40", borderRadius: 14, padding: 22, marginBottom: 18 }}>
-                      <p style={{ fontSize: 10, color: "#6366f1", fontWeight: 700, letterSpacing: 1.5, marginBottom: 6 }}>IDEAL INTERVIEWER PROFILE</p>
-                      <p style={{ fontSize: 12, color: "#999", lineHeight: 1.6 }}>{r.idealInterviewerProfile}</p>
-                    </div>
-                  )}
-                </>
-              );
-            })()}
-          </div>
+        {hasEvaluated && !isEvaluating && (
+          <>
+            <button className="btn-secondary" onClick={handleEvaluateMore}>
+              Evaluate More
+            </button>
+            <button className="btn-secondary" onClick={handleStartFresh}>
+              Start Fresh
+            </button>
+          </>
         )}
       </div>
+
+      {/* Progress Log */}
+      {progressLog.length > 0 && (
+        <div className="progress-section">
+          <h3>
+            {isEvaluating && <span className="spinner" />}
+            Pipeline Progress
+          </h3>
+          <div className="progress-log">
+            {progressLog.map((entry, i) => (
+              <div key={i} className="log-entry">
+                <span className="log-time">{entry.time}</span>
+                <span>{entry.msg}</span>
+              </div>
+            ))}
+            <div ref={logEndRef} />
+          </div>
+        </div>
+      )}
+
+      {/* Parsed JD Skills Summary */}
+      {parsedJDs && results && (
+        <div className="jd-parsed-summary">
+          <h3>JD Skills Breakdown</h3>
+          {parsedJDs.map((jd, i) => (
+            <div key={i} style={{ marginBottom: i < parsedJDs.length - 1 ? 16 : 0 }}>
+              <div
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "var(--text-primary)",
+                  marginBottom: 8,
+                }}
+              >
+                {jd.filename}{" "}
+                <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>
+                  — {jd.jdProfile}
+                </span>
+              </div>
+              <div className="jd-parsed-chips">
+                {(jd.parsed?.must_have || []).map((s, j) => (
+                  <span key={`m-${j}`} className="jd-chip must-have">
+                    {s.skill}
+                  </span>
+                ))}
+                {(jd.parsed?.good_to_have || []).map((s, j) => (
+                  <span key={`g-${j}`} className="jd-chip good-to-have">
+                    {s.skill}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Results */}
+      {displayResults && (
+        <div className="results-section">
+          <h2>Evaluation Results</h2>
+
+          {(Array.isArray(displayResults) ? displayResults : []).map(
+            (result, i) => {
+              if (result.error) {
+                return (
+                  <div key={i} className="error-card">
+                    <div className="error-title">{result.interviewerFile}</div>
+                    <div className="error-msg">{result.error}</div>
+                  </div>
+                );
+              }
+
+              return (
+                <div key={i} className="interviewer-card">
+                  <div className="interviewer-header">
+                    <div>
+                      <span className="int-name">{result.interviewerName}</span>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: "var(--text-muted)",
+                          marginLeft: 10,
+                        }}
+                      >
+                        {result.interviewerFile}
+                      </span>
+                    </div>
+                    <div className="int-profiles">
+                      {(result.profiles || []).map((p, j) => (
+                        <span key={j} className="int-profile">
+                          {p}
+                        </span>
+                      ))}
+                      {(!result.profiles || result.profiles.length === 0) && (
+                        <span className="int-profile">
+                          {result.dominantProfile || "Unknown"}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="jd-results-grid">
+                    {(result.jdResults || []).map((jdResult, j) => {
+                      const color = getVerdictColor(jdResult.verdict);
+                      return (
+                        <div key={j} className="jd-result-row">
+                          <div className="jd-name">
+                            {jdResult.jdFilename}
+                            <span className="jd-profile-tag">
+                              {jdResult.jdProfile}
+                            </span>
+                          </div>
+
+                          <div className={`match-percentage ${color}`}>
+                            {jdResult.overallPercentage}%
+                          </div>
+
+                          <span
+                            className={`verdict-badge verdict-${jdResult.verdict}`}
+                          >
+                            {jdResult.verdict}
+                          </span>
+
+                          <div className="jd-summary">{jdResult.summary}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            }
+          )}
+        </div>
+      )}
     </div>
   );
 }
