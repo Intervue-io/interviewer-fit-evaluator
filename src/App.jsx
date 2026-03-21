@@ -15,10 +15,7 @@ function getVerdictColor(verdict) {
 
 function formatTime() {
   return new Date().toLocaleTimeString("en-US", {
-    hour12: false,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
+    hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit",
   });
 }
 
@@ -36,7 +33,6 @@ export default function App() {
   const intInputRef = useRef(null);
   const logEndRef = useRef(null);
 
-  // Auto-scroll progress log
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [progressLog]);
@@ -45,7 +41,6 @@ export default function App() {
     setProgressLog((prev) => [...prev, { time: formatTime(), msg }]);
   }, []);
 
-  // File handlers
   const handleJDFiles = (e) => {
     const files = Array.from(e.target.files);
     setJdFiles((prev) => [...prev, ...files].slice(0, 5));
@@ -58,15 +53,9 @@ export default function App() {
     e.target.value = "";
   };
 
-  const removeJD = (idx) => {
-    setJdFiles((prev) => prev.filter((_, i) => i !== idx));
-  };
+  const removeJD = (idx) => setJdFiles((prev) => prev.filter((_, i) => i !== idx));
+  const removeInterviewer = (idx) => setInterviewerFiles((prev) => prev.filter((_, i) => i !== idx));
 
-  const removeInterviewer = (idx) => {
-    setInterviewerFiles((prev) => prev.filter((_, i) => i !== idx));
-  };
-
-  // Main evaluate function
   const handleEvaluate = async () => {
     if (jdFiles.length === 0 && !parsedJDs) return;
     if (interviewerFiles.length === 0) return;
@@ -79,26 +68,15 @@ export default function App() {
 
     const formData = new FormData();
 
-    // If we have previously parsed JDs, send them
     if (parsedJDs) {
       formData.append("parsedJDs", JSON.stringify(parsedJDs));
     }
 
-    // Add new JD files
-    for (const file of jdFiles) {
-      formData.append("jds", file);
-    }
-
-    for (const file of interviewerFiles) {
-      formData.append("interviewers", file);
-    }
+    for (const file of jdFiles) formData.append("jds", file);
+    for (const file of interviewerFiles) formData.append("interviewers", file);
 
     try {
-      const response = await fetch("/api/evaluate", {
-        method: "POST",
-        body: formData,
-      });
-
+      const response = await fetch("/api/evaluate", { method: "POST", body: formData });
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -123,48 +101,28 @@ export default function App() {
               case "progress":
                 addLog(event.message);
                 break;
-
               case "jds_parsed":
-                addLog(
-                  `JDs parsed: ${event.jds.map((j) => `${j.filename} (${j.jdProfile}, ${j.mustHaveCount} must-have, ${j.goodToHaveCount} good-to-have)`).join("; ")}`
-                );
+                addLog(`JDs parsed: ${event.jds.map((j) => `${j.filename} (${j.jdProfile}, ${j.mustHaveCount}M / ${j.goodToHaveCount}G)`).join("; ")}`);
                 break;
-
               case "interviewer_complete":
-                addLog(
-                  `✓ ${event.result.interviewerName} complete — ${event.result.jdResults.map((r) => `${r.verdict} ${r.overallPercentage}%`).join(", ")}`
-                );
+                addLog(`✓ ${event.result.interviewerName} — ${event.result.jdResults.map((r) => `${r.verdict} ${r.overallPercentage}%`).join(", ")} [${event.result.processingTime}]`);
                 setStreamResults((prev) => [...prev, event.result]);
                 break;
-
               case "interviewer_error":
-                addLog(`✗ Error processing ${event.filename}: ${event.error}`);
-                setStreamResults((prev) => [
-                  ...prev,
-                  {
-                    interviewerFile: event.filename,
-                    interviewerName: "Error",
-                    error: event.error,
-                    jdResults: [],
-                    profiles: [],
-                  },
-                ]);
+                addLog(`✗ Error: ${event.filename} — ${event.error}`);
+                setStreamResults((prev) => [...prev, { interviewerFile: event.filename, interviewerName: "Error", error: event.error, jdResults: [], profiles: [] }]);
                 break;
-
               case "complete":
                 addLog("Evaluation complete.");
                 setResults(event.results);
                 setParsedJDs(event.parsedJDs);
                 setHasEvaluated(true);
                 break;
-
               case "error":
                 addLog(`Error: ${event.message}`);
                 break;
             }
-          } catch (e) {
-            // Ignore parse errors in stream
-          }
+          } catch (e) {}
         }
       }
     } catch (err) {
@@ -174,16 +132,13 @@ export default function App() {
     setIsEvaluating(false);
   };
 
-  // Evaluate More: keep JDs, clear interviewers
   const handleEvaluateMore = () => {
     setInterviewerFiles([]);
     setStreamResults([]);
     setResults(null);
     setProgressLog([]);
-    // Keep parsedJDs and jdFiles
   };
 
-  // Start Fresh: reset everything
   const handleStartFresh = () => {
     setJdFiles([]);
     setInterviewerFiles([]);
@@ -198,103 +153,74 @@ export default function App() {
 
   return (
     <div className="app-container">
+      {/* Header with Intervue Logo */}
       <header className="app-header">
-        <h1>
-          Interviewer Fit Evaluator
-          <span className="version-badge">v2.0</span>
-        </h1>
-        <p>
-          Powered by Intervue.io CV Parser pipeline — 13-step skill extraction with
-          profile-aware semantic matching
-        </p>
+        <div className="header-logo-row">
+          <img src="/intervue-logo.svg" alt="Intervue" className="intervue-logo" />
+          <h1>
+            Interviewer Fit Evaluator
+            <span className="version-badge">v3</span>
+          </h1>
+        </div>
+        <div className="header-subtitle">
+          <p>LinkedIn profile ↔ JD skill matching</p>
+          <span className="pipeline-badge">4-call pipeline</span>
+        </div>
       </header>
 
       {/* Upload Section */}
       <div className="upload-section">
-        {/* JD Upload */}
         <div className="upload-card">
           <h2>Job Descriptions</h2>
           <p className="upload-subtitle">
             Upload up to 5 JDs (.pdf, .txt, .docx)
             {parsedJDs && (
-              <span style={{ color: "var(--strong)", marginLeft: 8 }}>
-                — {parsedJDs.length} JD{parsedJDs.length > 1 ? "s" : ""} already
-                parsed
+              <span style={{ color: "var(--intervue-green)", marginLeft: 8 }}>
+                — {parsedJDs.length} JD{parsedJDs.length > 1 ? "s" : ""} already parsed
               </span>
             )}
           </p>
-
           <div
             className={`file-drop-zone ${jdFiles.length > 0 || parsedJDs ? "has-files" : ""}`}
             onClick={() => jdInputRef.current?.click()}
           >
-            <input
-              ref={jdInputRef}
-              type="file"
-              multiple
-              accept=".pdf,.txt,.docx"
-              onChange={handleJDFiles}
-            />
-            {jdFiles.length === 0 && !parsedJDs ? (
-              <p>Click to upload JD files</p>
-            ) : (
-              <p>Click to add more JDs</p>
-            )}
+            <input ref={jdInputRef} type="file" multiple accept=".pdf,.txt,.docx" onChange={handleJDFiles} />
+            <p>{jdFiles.length === 0 && !parsedJDs ? "Click to upload JD files" : "Click to add more JDs"}</p>
           </div>
 
-          {/* Previously parsed JDs */}
           {parsedJDs && (
             <div className="file-list">
               {parsedJDs.map((jd, i) => (
                 <div key={`parsed-${i}`} className="file-item">
                   <span className="file-name">✓ {jd.filename}</span>
-                  <span className="file-size">
-                    {jd.jdProfile} · {jd.mustHaveCount}M / {jd.goodToHaveCount}G
-                  </span>
+                  <span className="file-size">{jd.jdProfile} · {jd.mustHaveCount}M / {jd.goodToHaveCount}G</span>
                 </div>
               ))}
             </div>
           )}
 
-          {/* New JD files */}
           {jdFiles.length > 0 && (
             <div className="file-list">
               {jdFiles.map((file, i) => (
                 <div key={i} className="file-item">
                   <span className="file-name">{file.name}</span>
                   <span className="file-size">{formatFileSize(file.size)}</span>
-                  <button className="remove-btn" onClick={() => removeJD(i)}>
-                    ×
-                  </button>
+                  <button className="remove-btn" onClick={() => removeJD(i)}>×</button>
                 </div>
               ))}
             </div>
           )}
         </div>
 
-        {/* Interviewer Upload */}
         <div className="upload-card">
           <h2>Interviewer Profiles</h2>
-          <p className="upload-subtitle">
-            Upload up to 10 CVs / LinkedIn PDFs (.pdf, .txt, .docx)
-          </p>
-
+          <p className="upload-subtitle">Upload up to 10 LinkedIn PDFs (.pdf, .txt, .docx)</p>
           <div
             className={`file-drop-zone ${interviewerFiles.length > 0 ? "has-files" : ""}`}
             onClick={() => intInputRef.current?.click()}
           >
-            <input
-              ref={intInputRef}
-              type="file"
-              multiple
-              accept=".pdf,.txt,.docx"
-              onChange={handleInterviewerFiles}
-            />
-            {interviewerFiles.length === 0 ? (
-              <p>Click to upload interviewer CVs</p>
-            ) : (
-              <p>Click to add more interviewers</p>
-            )}
+            <input ref={intInputRef} type="file" multiple accept=".pdf,.txt,.docx" onChange={handleInterviewerFiles} />
+            <p>{interviewerFiles.length === 0 ? "Click to upload LinkedIn PDFs" : "Click to add more interviewers"}</p>
           </div>
 
           {interviewerFiles.length > 0 && (
@@ -303,12 +229,7 @@ export default function App() {
                 <div key={i} className="file-item">
                   <span className="file-name">{file.name}</span>
                   <span className="file-size">{formatFileSize(file.size)}</span>
-                  <button
-                    className="remove-btn"
-                    onClick={() => removeInterviewer(i)}
-                  >
-                    ×
-                  </button>
+                  <button className="remove-btn" onClick={() => removeInterviewer(i)}>×</button>
                 </div>
               ))}
             </div>
@@ -320,11 +241,7 @@ export default function App() {
       <div className="button-row">
         <button
           className="btn-primary"
-          disabled={
-            isEvaluating ||
-            (jdFiles.length === 0 && !parsedJDs) ||
-            interviewerFiles.length === 0
-          }
+          disabled={isEvaluating || (jdFiles.length === 0 && !parsedJDs) || interviewerFiles.length === 0}
           onClick={handleEvaluate}
         >
           {isEvaluating && <span className="spinner" />}
@@ -333,12 +250,8 @@ export default function App() {
 
         {hasEvaluated && !isEvaluating && (
           <>
-            <button className="btn-secondary" onClick={handleEvaluateMore}>
-              Evaluate More
-            </button>
-            <button className="btn-secondary" onClick={handleStartFresh}>
-              Start Fresh
-            </button>
+            <button className="btn-secondary" onClick={handleEvaluateMore}>Evaluate More</button>
+            <button className="btn-secondary" onClick={handleStartFresh}>Start Fresh</button>
           </>
         )}
       </div>
@@ -346,10 +259,7 @@ export default function App() {
       {/* Progress Log */}
       {progressLog.length > 0 && (
         <div className="progress-section">
-          <h3>
-            {isEvaluating && <span className="spinner" />}
-            Pipeline Progress
-          </h3>
+          <h3>{isEvaluating && <span className="spinner" />}Pipeline Progress</h3>
           <div className="progress-log">
             {progressLog.map((entry, i) => (
               <div key={i} className="log-entry">
@@ -362,35 +272,22 @@ export default function App() {
         </div>
       )}
 
-      {/* Parsed JD Skills Summary */}
+      {/* JD Skills Breakdown */}
       {parsedJDs && results && (
         <div className="jd-parsed-summary">
           <h3>JD Skills Breakdown</h3>
           {parsedJDs.map((jd, i) => (
             <div key={i} style={{ marginBottom: i < parsedJDs.length - 1 ? 16 : 0 }}>
-              <div
-                style={{
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "var(--text-primary)",
-                  marginBottom: 8,
-                }}
-              >
-                {jd.filename}{" "}
-                <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>
-                  — {jd.jdProfile}
-                </span>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>
+                {jd.filename}
+                <span style={{ color: "var(--text-muted)", fontWeight: 400, marginLeft: 8 }}>— {jd.jdProfile}</span>
               </div>
               <div className="jd-parsed-chips">
                 {(jd.parsed?.must_have || []).map((s, j) => (
-                  <span key={`m-${j}`} className="jd-chip must-have">
-                    {s.skill}
-                  </span>
+                  <span key={`m-${j}`} className="jd-chip must-have">{s.skill}</span>
                 ))}
                 {(jd.parsed?.good_to_have || []).map((s, j) => (
-                  <span key={`g-${j}`} className="jd-chip good-to-have">
-                    {s.skill}
-                  </span>
+                  <span key={`g-${j}`} className="jd-chip good-to-have">{s.skill}</span>
                 ))}
               </div>
             </div>
@@ -403,77 +300,59 @@ export default function App() {
         <div className="results-section">
           <h2>Evaluation Results</h2>
 
-          {(Array.isArray(displayResults) ? displayResults : []).map(
-            (result, i) => {
-              if (result.error) {
-                return (
-                  <div key={i} className="error-card">
-                    <div className="error-title">{result.interviewerFile}</div>
-                    <div className="error-msg">{result.error}</div>
-                  </div>
-                );
-              }
-
+          {(Array.isArray(displayResults) ? displayResults : []).map((result, i) => {
+            if (result.error) {
               return (
-                <div key={i} className="interviewer-card">
-                  <div className="interviewer-header">
-                    <div>
-                      <span className="int-name">{result.interviewerName}</span>
-                      <span
-                        style={{
-                          fontSize: 12,
-                          color: "var(--text-muted)",
-                          marginLeft: 10,
-                        }}
-                      >
-                        {result.interviewerFile}
-                      </span>
-                    </div>
-                    <div className="int-profiles">
-                      {(result.profiles || []).map((p, j) => (
-                        <span key={j} className="int-profile">
-                          {p}
-                        </span>
-                      ))}
-                      {(!result.profiles || result.profiles.length === 0) && (
-                        <span className="int-profile">
-                          {result.dominantProfile || "Unknown"}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="jd-results-grid">
-                    {(result.jdResults || []).map((jdResult, j) => {
-                      const color = getVerdictColor(jdResult.verdict);
-                      return (
-                        <div key={j} className="jd-result-row">
-                          <div className="jd-name">
-                            {jdResult.jdFilename}
-                            <span className="jd-profile-tag">
-                              {jdResult.jdProfile}
-                            </span>
-                          </div>
-
-                          <div className={`match-percentage ${color}`}>
-                            {jdResult.overallPercentage}%
-                          </div>
-
-                          <span
-                            className={`verdict-badge verdict-${jdResult.verdict}`}
-                          >
-                            {jdResult.verdict}
-                          </span>
-
-                          <div className="jd-summary">{jdResult.summary}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                <div key={i} className="error-card">
+                  <div className="error-title">{result.interviewerFile}</div>
+                  <div className="error-msg">{result.error}</div>
                 </div>
               );
             }
-          )}
+
+            return (
+              <div key={i} className="interviewer-card">
+                <div className="interviewer-header">
+                  <div>
+                    <span className="int-name">{result.interviewerName}</span>
+                    <span className="int-meta">{result.interviewerFile}</span>
+                    {result.processingTime && <span className="int-time">{result.processingTime}</span>}
+                    {result.totalExperienceYears && (
+                      <span className="int-meta"> · {result.totalExperienceYears}+ yrs exp</span>
+                    )}
+                  </div>
+                  <div className="int-profiles">
+                    {result.primaryProfile && (
+                      <span className="int-profile">{result.primaryProfile}</span>
+                    )}
+                    {result.secondaryProfile && (
+                      <span className="int-profile secondary">{result.secondaryProfile}</span>
+                    )}
+                    {!result.primaryProfile && (result.profiles || []).map((p, j) => (
+                      <span key={j} className="int-profile">{p}</span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="jd-results-grid">
+                  {(result.jdResults || []).map((jdResult, j) => {
+                    const color = getVerdictColor(jdResult.verdict);
+                    return (
+                      <div key={j} className="jd-result-row">
+                        <div className="jd-name">
+                          {jdResult.jdFilename}
+                          <span className="jd-profile-tag">{jdResult.jdProfile}</span>
+                        </div>
+                        <div className={`match-percentage ${color}`}>{jdResult.overallPercentage}%</div>
+                        <span className={`verdict-badge verdict-${jdResult.verdict}`}>{jdResult.verdict}</span>
+                        <div className="jd-summary">{jdResult.summary}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
