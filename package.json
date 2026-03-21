@@ -1,7 +1,7 @@
 {
   "name": "interviewer-fit-evaluator",
   "private": true,
-  "version": "2.0.0",
+  "version": "3.0.0",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"node server/index.js\" \"vite\"",
