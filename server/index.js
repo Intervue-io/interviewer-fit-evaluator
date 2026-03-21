@@ -409,9 +409,17 @@ app.post(
 
       // ---- CALL 1: Parse JDs ----
       const parsedJDs = [...preParsedJDs];
+      const existingJDNames = new Set(preParsedJDs.map((jd) => jd.filename));
 
       for (let i = 0; i < jdFiles.length; i++) {
         const jdFile = jdFiles[i];
+
+        // Skip if this JD was already pre-parsed (dedup safety net)
+        if (existingJDNames.has(jdFile.originalname)) {
+          send({ type: "progress", step: "jd_parse", message: `Skipping already-parsed JD: ${jdFile.originalname}` });
+          continue;
+        }
+
         send({ type: "progress", step: "jd_parse", message: `Parsing JD ${i + 1}/${jdFiles.length}: ${jdFile.originalname}` });
 
         const jdContent = await extractContent(jdFile);
@@ -425,6 +433,8 @@ app.post(
           jdSkills,
           jdProfile,
         });
+
+        existingJDNames.add(jdFile.originalname);
       }
 
       send({
