@@ -133,6 +133,7 @@ export default function App() {
   };
 
   const handleEvaluateMore = () => {
+    setJdFiles([]);        // Clear raw JD files — they're already in parsedJDs
     setInterviewerFiles([]);
     setStreamResults([]);
     setResults(null);
