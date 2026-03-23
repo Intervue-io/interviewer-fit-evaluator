@@ -1,18 +1,20 @@
 :root {
-  --bg-primary: #0a0e17;
-  --bg-secondary: #111827;
-  --bg-card: #1a2235;
-  --bg-card-hover: #1f2a40;
-  --bg-input: #0d1320;
-  --border: #2a3550;
-  --border-focus: #4f7cff;
-  --text-primary: #e8ecf4;
-  --text-secondary: #8b95a8;
-  --text-muted: #5a6478;
-  --accent: #4f7cff;
-  --accent-hover: #6b91ff;
-  --accent-glow: rgba(79, 124, 255, 0.15);
-  --intervue-green: #00D100;
+  --bg-primary: #110b1f;
+  --bg-secondary: #1a1230;
+  --bg-card: #201740;
+  --bg-card-hover: #281e4d;
+  --bg-input: #140e26;
+  --border: #362b5c;
+  --border-focus: #7c3aed;
+  --text-primary: #ede8f5;
+  --text-secondary: #9b8fc0;
+  --text-muted: #6b5f8a;
+  --accent: #7c3aed;
+  --accent-hover: #8b5cf6;
+  --accent-glow: rgba(124, 58, 237, 0.15);
+  --intervue-purple: #7c3aed;
+  --intervue-purple-hover: #8b5cf6;
+  --intervue-purple-glow: rgba(124, 58, 237, 0.25);
   --strong: #34d399;
   --strong-bg: rgba(52, 211, 153, 0.1);
   --moderate: #fbbf24;
@@ -46,7 +48,19 @@ body {
   min-height: 100vh;
 }
 
-/* ===== Header with Logo ===== */
+/* ===== Top Bar with Wordmark ===== */
+.top-bar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 32px;
+}
+
+.intervue-wordmark {
+  height: 24px;
+  width: auto;
+}
+
+/* ===== Header ===== */
 .app-header {
   display: flex;
   flex-direction: column;
@@ -59,12 +73,6 @@ body {
   align-items: center;
   gap: 14px;
   margin-bottom: 6px;
-}
-
-.intervue-logo {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
 }
 
 .app-header h1 {
@@ -80,9 +88,9 @@ body {
   font-weight: 600;
   letter-spacing: 0.5px;
   text-transform: uppercase;
-  color: var(--intervue-green);
-  background: rgba(0, 209, 0, 0.1);
-  border: 1px solid rgba(0, 209, 0, 0.25);
+  color: var(--intervue-purple);
+  background: rgba(124, 58, 237, 0.1);
+  border: 1px solid rgba(124, 58, 237, 0.25);
   padding: 3px 10px;
   border-radius: 20px;
   margin-left: 10px;
@@ -150,8 +158,8 @@ body {
 }
 
 .file-drop-zone:hover {
-  border-color: var(--intervue-green);
-  background: rgba(0, 209, 0, 0.04);
+  border-color: var(--intervue-purple);
+  background: rgba(124, 58, 237, 0.04);
 }
 
 .file-drop-zone.has-files {
@@ -195,17 +203,17 @@ body {
 /* ===== Buttons ===== */
 .btn-primary {
   display: inline-flex; align-items: center; gap: 8px;
-  padding: 12px 28px;
-  background: var(--intervue-green);
-  color: #000;
-  border: none; border-radius: var(--radius-sm);
+  padding: 14px 32px;
+  background: var(--intervue-purple);
+  color: #fff;
+  border: none; border-radius: 28px;
   font-family: var(--font-sans); font-size: 14px; font-weight: 600;
   cursor: pointer; transition: all 0.2s ease;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #00e800;
-  box-shadow: 0 0 24px rgba(0, 209, 0, 0.2);
+  background: var(--intervue-purple-hover);
+  box-shadow: 0 0 28px var(--intervue-purple-glow);
 }
 
 .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -244,11 +252,11 @@ body {
 
 .progress-log .log-entry { display: flex; gap: 8px; }
 .progress-log .log-entry .log-time { color: var(--text-muted); flex-shrink: 0; }
-.progress-log .log-entry:last-child { color: var(--intervue-green); }
+.progress-log .log-entry:last-child { color: var(--intervue-purple); }
 
 .spinner {
   display: inline-block; width: 16px; height: 16px;
-  border: 2px solid var(--border); border-top-color: var(--intervue-green);
+  border: 2px solid var(--border); border-top-color: var(--intervue-purple);
   border-radius: 50%; animation: spin 0.7s linear infinite;
   vertical-align: middle; margin-right: 8px;
 }
@@ -281,9 +289,9 @@ body {
 
 .int-profile {
   font-size: 12px; font-weight: 500;
-  color: var(--intervue-green);
-  background: rgba(0, 209, 0, 0.08);
-  border: 1px solid rgba(0, 209, 0, 0.2);
+  color: var(--intervue-purple);
+  background: rgba(124, 58, 237, 0.08);
+  border: 1px solid rgba(124, 58, 237, 0.2);
   padding: 3px 10px; border-radius: 20px;
 }
 
