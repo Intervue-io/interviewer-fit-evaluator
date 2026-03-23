@@ -75,54 +75,97 @@ export default function App() {
     for (const file of jdFiles) formData.append("jds", file);
     for (const file of interviewerFiles) formData.append("interviewers", file);
 
+    function processEvent(event) {
+      switch (event.type) {
+        case "progress":
+          addLog(event.message);
+          break;
+        case "jds_parsed":
+          addLog(`JDs parsed: ${event.jds.map((j) => `${j.filename} (${j.jdProfile}, ${j.mustHaveCount}M / ${j.goodToHaveCount}G)`).join("; ")}`);
+          break;
+        case "interviewer_complete":
+          addLog(`✓ ${event.result.interviewerName} — ${event.result.jdResults.map((r) => `${r.verdict} ${r.overallPercentage}%`).join(", ")} [${event.result.processingTime}]`);
+          setStreamResults((prev) => [...prev, event.result]);
+          break;
+        case "interviewer_error":
+          addLog(`✗ Error: ${event.filename} — ${event.error}`);
+          setStreamResults((prev) => [...prev, { interviewerFile: event.filename, interviewerName: "Error", error: event.error, jdResults: [], profiles: [] }]);
+          break;
+        case "complete":
+          addLog("Evaluation complete.");
+          setResults(event.results);
+          setParsedJDs(event.parsedJDs);
+          setHasEvaluated(true);
+          break;
+        case "error":
+          addLog(`Error: ${event.message}`);
+          break;
+      }
+    }
+
     try {
       const response = await fetch("/api/evaluate", { method: "POST", body: formData });
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      // Safari-compatible SSE parsing: read full text and process events
+      // Safari sometimes doesn't stream ReadableStream properly, so we
+      // handle both streaming and non-streaming cases
+      if (!response.body || !response.body.getReader) {
+        // Fallback: read entire response at once (Safari fallback)
+        const fullText = await response.text();
+        const events = fullText.split("\n\n").filter(Boolean);
+        for (const eventBlock of events) {
+          for (const line of eventBlock.split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6).trim();
+            if (!jsonStr) continue;
+            try {
+              processEvent(JSON.parse(jsonStr));
+            } catch (e) {}
+          }
+        }
+      } else {
+        // Streaming: use ReadableStream with robust SSE parsing
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const jsonStr = line.slice(6);
-          if (!jsonStr.trim()) continue;
-
-          try {
-            const event = JSON.parse(jsonStr);
-
-            switch (event.type) {
-              case "progress":
-                addLog(event.message);
-                break;
-              case "jds_parsed":
-                addLog(`JDs parsed: ${event.jds.map((j) => `${j.filename} (${j.jdProfile}, ${j.mustHaveCount}M / ${j.goodToHaveCount}G)`).join("; ")}`);
-                break;
-              case "interviewer_complete":
-                addLog(`✓ ${event.result.interviewerName} — ${event.result.jdResults.map((r) => `${r.verdict} ${r.overallPercentage}%`).join(", ")} [${event.result.processingTime}]`);
-                setStreamResults((prev) => [...prev, event.result]);
-                break;
-              case "interviewer_error":
-                addLog(`✗ Error: ${event.filename} — ${event.error}`);
-                setStreamResults((prev) => [...prev, { interviewerFile: event.filename, interviewerName: "Error", error: event.error, jdResults: [], profiles: [] }]);
-                break;
-              case "complete":
-                addLog("Evaluation complete.");
-                setResults(event.results);
-                setParsedJDs(event.parsedJDs);
-                setHasEvaluated(true);
-                break;
-              case "error":
-                addLog(`Error: ${event.message}`);
-                break;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            // Process any remaining data in buffer when stream ends
+            if (buffer.trim()) {
+              const remaining = buffer.split("\n");
+              for (const line of remaining) {
+                if (!line.startsWith("data: ")) continue;
+                const jsonStr = line.slice(6).trim();
+                if (!jsonStr) continue;
+                try {
+                  processEvent(JSON.parse(jsonStr));
+                } catch (e) {}
+              }
             }
-          } catch (e) {}
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // SSE events are delimited by double newlines (\n\n)
+          // Process only complete events, keep incomplete data in buffer
+          const eventBoundary = buffer.lastIndexOf("\n\n");
+          if (eventBoundary === -1) continue; // No complete event yet
+
+          const completePart = buffer.substring(0, eventBoundary);
+          buffer = buffer.substring(eventBoundary + 2);
+
+          const lines = completePart.split("\n");
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6).trim();
+            if (!jsonStr) continue;
+            try {
+              processEvent(JSON.parse(jsonStr));
+            } catch (e) {}
+          }
         }
       }
     } catch (err) {
