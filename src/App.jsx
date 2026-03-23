@@ -103,28 +103,38 @@ export default function App() {
       }
     }
 
-    try {
-      const response = await fetch("/api/evaluate", { method: "POST", body: formData });
+    // Detect Safari (uses sync endpoint to avoid SSE issues)
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 
-      // Safari-compatible SSE parsing: read full text and process events
-      // Safari sometimes doesn't stream ReadableStream properly, so we
-      // handle both streaming and non-streaming cases
-      if (!response.body || !response.body.getReader) {
-        // Fallback: read entire response at once (Safari fallback)
-        const fullText = await response.text();
-        const events = fullText.split("\n\n").filter(Boolean);
-        for (const eventBlock of events) {
-          for (const line of eventBlock.split("\n")) {
-            if (!line.startsWith("data: ")) continue;
-            const jsonStr = line.slice(6).trim();
-            if (!jsonStr) continue;
-            try {
-              processEvent(JSON.parse(jsonStr));
-            } catch (e) {}
+    try {
+      if (isSafari) {
+        // Safari: use non-streaming JSON endpoint
+        addLog("Using Safari-compatible mode...");
+        const response = await fetch("/api/evaluate-sync", { method: "POST", body: formData });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({ error: "Server error" }));
+          addLog(`Error: ${errData.error}`);
+        } else {
+          const data = await response.json();
+          if (data.results) {
+            for (const result of data.results) {
+              if (result.error) {
+                addLog(`✗ Error: ${result.interviewerFile} — ${result.error}`);
+              } else {
+                addLog(`✓ ${result.interviewerName} — ${result.jdResults.map((r) => `${r.verdict} ${r.overallPercentage}%`).join(", ")} [${result.processingTime}]`);
+              }
+              setStreamResults((prev) => [...prev, result]);
+            }
+            setResults(data.results);
+            setParsedJDs(data.parsedJDs);
+            setHasEvaluated(true);
+            addLog("Evaluation complete.");
           }
         }
       } else {
-        // Streaming: use ReadableStream with robust SSE parsing
+        // Chrome/Firefox/Edge: use SSE streaming for real-time progress
+        const response = await fetch("/api/evaluate", { method: "POST", body: formData });
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
@@ -132,16 +142,13 @@ export default function App() {
         while (true) {
           const { done, value } = await reader.read();
           if (done) {
-            // Process any remaining data in buffer when stream ends
             if (buffer.trim()) {
               const remaining = buffer.split("\n");
               for (const line of remaining) {
                 if (!line.startsWith("data: ")) continue;
                 const jsonStr = line.slice(6).trim();
                 if (!jsonStr) continue;
-                try {
-                  processEvent(JSON.parse(jsonStr));
-                } catch (e) {}
+                try { processEvent(JSON.parse(jsonStr)); } catch (e) {}
               }
             }
             break;
@@ -149,10 +156,8 @@ export default function App() {
 
           buffer += decoder.decode(value, { stream: true });
 
-          // SSE events are delimited by double newlines (\n\n)
-          // Process only complete events, keep incomplete data in buffer
           const eventBoundary = buffer.lastIndexOf("\n\n");
-          if (eventBoundary === -1) continue; // No complete event yet
+          if (eventBoundary === -1) continue;
 
           const completePart = buffer.substring(0, eventBoundary);
           buffer = buffer.substring(eventBoundary + 2);
@@ -162,9 +167,7 @@ export default function App() {
             if (!line.startsWith("data: ")) continue;
             const jsonStr = line.slice(6).trim();
             if (!jsonStr) continue;
-            try {
-              processEvent(JSON.parse(jsonStr));
-            } catch (e) {}
+            try { processEvent(JSON.parse(jsonStr)); } catch (e) {}
           }
         }
       }
