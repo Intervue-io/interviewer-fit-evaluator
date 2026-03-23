@@ -154,10 +154,14 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* Header with Intervue Logo */}
+      {/* Top bar with Intervue wordmark */}
+      <div className="top-bar">
+        <img src="/intervue-logo.svg" alt="Intervue" className="intervue-wordmark" />
+      </div>
+
+      {/* Header */}
       <header className="app-header">
         <div className="header-logo-row">
-          <img src="/intervue-logo.svg" alt="Intervue" className="intervue-logo" />
           <h1>
             Interviewer Fit Evaluator
             <span className="version-badge">v3</span>
@@ -176,7 +180,7 @@ export default function App() {
           <p className="upload-subtitle">
             Upload up to 5 JDs (.pdf, .txt, .docx)
             {parsedJDs && (
-              <span style={{ color: "var(--intervue-green)", marginLeft: 8 }}>
+              <span style={{ color: "var(--intervue-purple)", marginLeft: 8 }}>
                 — {parsedJDs.length} JD{parsedJDs.length > 1 ? "s" : ""} already parsed
               </span>
             )}
