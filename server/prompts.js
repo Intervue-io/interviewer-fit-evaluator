@@ -153,13 +153,19 @@ Classify the person into ONE primary profile and optionally ONE secondary profil
 Available profiles:
 DevOps, Frontend, IOS, Backend, Full Stack, Automation QA, MANUAL_QA, Android, Flutter,
 Data Science, Data Analyst, Data Engineering, MLOPS, Business Intelligence,
-ML/AI, SAP, SalesForce, ServiceNow, Database Administrator, Data Modeler,
+ML/AI, SAP, Salesforce, ServiceNow, Database Administrator, Data Modeler,
 Database Performance Tuner, Pega, Blockchain, React Native, Program Manager,
 Technical Program Manager, Product Manager, Scrum Master, Project Manager,
 Application Security Engineering, Business Analyst, Adobe Experience Manager,
 Cloud Engineering, Drupal, DevSecOps, Embedded Engineer, Dynamics 365,
 Information Security, Cyber Security, Prompt Engineer, Ethical Hacking,
-Networking Engineer
+Networking Engineer, Business Operations, Infrastructure Engineering, Site Reliability Engineer,
+Microsoft Business Apps, Oracle, SharePoint, Product Designer, UI-UX Designer,
+Database Developer, Data Modeler, Brand Management, Product Marketing Management, Performance Marketing Management,
+Digital marketing Management, Content Marketing, Event Marketing Management, IT Support, Support,
+Embedded Software Architect, Sales Enablement, Channel Sales, Sales Development Representative,
+Account Management, Accountant, Fintech, Corporate Legal Advisor, Talent Acquisition, HR Business Partner,
+FPGA Design Engineer, Functional Safety Engineer, Automotive Cybersecurity Engineer, Functional Safety Auditor
 
 Classification priority (use in this order):
 1. **Headline** — strongest signal. "DevOps Architect" → DevOps. "Lead Product Manager" → Product Manager.
