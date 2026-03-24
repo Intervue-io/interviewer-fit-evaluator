@@ -277,11 +277,9 @@ For EACH JDskill:
 4. Compare the JDskill against ALL aggregated ResumeSkill entries.
 
 MATCHING RULES:
-- Match based on semantic similarity (conceptual meaning), not only keyword overlap.
+- Match based on conceptual or contextual meaning, not only keyword overlap.
 - Use ResumeSkill name AND source_details context for matching.
-- Certifications are STRONG evidence — "AWS Certified Solutions Architect" strongly matches "AWS" JD requirements.
 - Top Skills sidebar items are moderate evidence when aligned with experience.
-- If Resume profile differs from JD profile: still allow matching if technically valid, but note the profile difference.
 - Do NOT hallucinate resume skills.
 - Do NOT stretch indirect relationships into strong matches.
 
