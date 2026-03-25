@@ -257,9 +257,16 @@ Return JSON only. No explanations, no extra text.`;
 // PROMPT 4: JD ↔ RESUME MATCHING (adapted from Colab)
 // ============================================================
 
-export const MATCHING_PROMPT = `You are an expert technical hiring evaluator.
+export const MATCHING_PROMPT = `You are an expert technical hiring evaluator specializing in INTERVIEWER-to-JD matching.
 
-Your task is to compare JD skills with LinkedIn profile skills and determine semantic relevance.
+CRITICAL CONTEXT — INTERVIEWER MATCHING, NOT CANDIDATE MATCHING:
+You are NOT evaluating whether this person can DO the job. You are evaluating whether this person can INTERVIEW CANDIDATES for this job. This is a fundamental difference:
+- An interviewer with 10 years of Informatica PowerCenter experience CAN evaluate candidates for an IDMC role — they understand the domain, architecture, and can assess competence.
+- An interviewer with deep AWS experience CAN evaluate candidates for Azure roles — cloud architecture concepts transfer.
+- An interviewer with Spring Boot expertise CAN evaluate candidates for Django roles — backend architecture patterns are transferable.
+- An interviewer who has "architected data pipelines" CAN evaluate candidates for specific ETL tools they haven't personally used — they understand the underlying concepts.
+
+The question is: "Does this person have sufficient DOMAIN UNDERSTANDING to assess whether a candidate is competent?" — NOT "Does this person use the exact same tools?"
 
 INPUT:
 1. JD object:
@@ -267,32 +274,70 @@ INPUT:
    - skills[] (each contains: JDskill, score (importance), reason, source_line, category)
 
 2. Resume object:
-   - primary_profile
-   - secondary_profile (may be null)
-   - aggregated_skills[]
-     - ResumeSkill
-     - impact_score_max
-     - source_details[]
-     - signal_sources[]
+   - primary_profile, secondary_profile
+   - aggregated_skills[] with ResumeSkill, impact_score_max, source_details[], signal_sources[]
 
-INSTRUCTIONS:
-For EACH JDskill:
-1. Read the JD profile.
-2. Interpret the JDskill strictly within the conceptual scope of the JD profile.
-3. Read the Resume profiles (primary and secondary).
-4. Compare the JDskill against ALL aggregated ResumeSkill entries.
+3. JD full text (the original job description — use this for contextual understanding of what each skill means in context)
 
-MATCHING RULES:
-- Match based on conceptual or contextual meaning, not only keyword overlap.
-- Use ResumeSkill name AND source_details context for matching.
-- Top Skills sidebar items are moderate evidence when aligned with experience.
-- Do NOT hallucinate resume skills.
-- Do NOT stretch indirect relationships into strong matches.
+4. LinkedIn experience context (summary and experience descriptions — use this to understand the interviewer's actual depth beyond extracted skill labels)
 
-MATCH_STRENGTH CLASSIFICATION:
-- "strong" → Direct conceptual alignment; clearly satisfies JDskill. The person has demonstrated this skill through experience descriptions, certifications, or strong job title evidence.
-- "moderate" → Related capability but not exact; partial conceptual overlap. The person has adjacent skills or the skill is only evidenced through Top Skills/Summary.
-- "weak" → Indirect or inferred relevance; not core capability.
+MATCHING INSTRUCTIONS:
+
+For EACH JDskill, follow this process:
+
+STEP 1 — UNDERSTAND WHAT THE JD ACTUALLY NEEDS
+Read the JDskill name AND look at the full JD text to understand what this skill means in context.
+Example: "IDMC" in isolation is ambiguous. But in the JD context "Experience with Informatica IDMC for cloud data integration", you now understand this is about Informatica's cloud data integration platform.
+
+STEP 2 — IDENTIFY THE SKILL ECOSYSTEM / FAMILY
+Map the JDskill to its broader technology ecosystem or concept family. Examples:
+- "IDMC" → Informatica ecosystem (PowerCenter, IICS, Cloud Data Integration, MDM)
+- "Kubernetes" → Container orchestration ecosystem (Docker, ECS, EKS, AKS, OpenShift, container management)
+- "Terraform" → Infrastructure as Code ecosystem (CloudFormation, Ansible, Pulumi, IaC)
+- "React" → Frontend framework ecosystem (Angular, Vue, Next.js, frontend SPA development)
+- "Kafka" → Event streaming / messaging ecosystem (RabbitMQ, Kinesis, Pulsar, pub-sub, event-driven architecture)
+- "ISO 26262" → Functional safety ecosystem (AUTOSAR, ASIL, safety analysis, automotive safety)
+- "Jenkins" → CI/CD ecosystem (GitHub Actions, GitLab CI, ArgoCD, CircleCI, build automation)
+- "Spring Boot" → Backend framework ecosystem (Django, Flask, Express, microservices frameworks)
+- "Tableau" → BI/visualization ecosystem (Power BI, Looker, Grafana, data visualization)
+- "SolarWinds" → Network monitoring ecosystem (Nagios, Zabbix, PRTG, Datadog, infrastructure monitoring)
+
+STEP 3 — SEARCH THE INTERVIEWER'S FULL PROFILE FOR MATCHES
+Look across ALL available signals, not just the extracted skill labels:
+a) Aggregated ResumeSkills (extracted skill names)
+b) Source details and descriptions (the actual text from their LinkedIn)
+c) LinkedIn experience context (summary, job descriptions)
+d) Job titles and company context
+e) Certifications
+
+STEP 4 — CLASSIFY THE MATCH
+For interviewer evaluation, use this classification:
+
+"strong" match if ANY of these are true:
+- Direct keyword match (interviewer has the exact skill)
+- Same ecosystem/family match (interviewer has a closely related tool in the same ecosystem AND has demonstrated depth)
+- Foundational concept match (interviewer has deep experience with the underlying concept — e.g., "distributed systems" matches "Kafka" if the interviewer has built distributed architectures)
+- Certification match (relevant certification validates knowledge even without hands-on mention)
+
+"moderate" match if:
+- Adjacent ecosystem (interviewer has related but not same-family experience — e.g., backend development experience for a specific framework they haven't used)
+- Conceptual understanding likely (interviewer's role and seniority suggest they would understand this technology even if not listed — e.g., a 15-year DevOps architect likely understands any CI/CD tool)
+- Partial overlap (interviewer has some components of a composite skill)
+
+"weak" match if:
+- Tangential relevance only (interviewer works in the same broad domain but hasn't demonstrated relevant depth)
+- Very indirect inference
+
+No match (empty matched_resume_skills) ONLY if:
+- The skill is in a completely different domain with no conceptual bridge
+- There is genuinely zero signal from any source
+
+IMPORTANT MATCHING PRINCIPLES:
+1. NEVER return 0% for an interviewer whose profile is in the same broad domain as the JD. A DevOps engineer will always have SOME relevance to a DevOps JD, even if specific tools differ.
+2. Seniority and breadth matter — a person with 15+ years in a domain has likely encountered most tools in that ecosystem even if not listed on LinkedIn.
+3. LinkedIn profiles are SPARSE — absence of a keyword does NOT mean absence of the skill. Look for conceptual indicators.
+4. The JD's full text gives you context that the extracted skill name alone doesn't. USE IT.
+5. The interviewer's experience descriptions give you depth signals. USE THEM.
 
 OUTPUT FORMAT (STRICT JSON):
 {
@@ -306,19 +351,20 @@ OUTPUT FORMAT (STRICT JSON):
       "category": "<must_have or good_to_have>",
       "matched_resume_skills": [
         {
-          "ResumeSkill": "<resume skill name>",
+          "ResumeSkill": "<resume skill name or ecosystem-inferred skill>",
           "impact_score_max": <value>,
           "match_strength": "strong | moderate | weak",
-          "reasoning": "<Concise technical justification. Maximum 60 words.>"
+          "match_type": "direct | ecosystem | conceptual | certification | seniority_inferred",
+          "reasoning": "<Concise technical justification explaining the conceptual connection. Maximum 80 words.>"
         }
       ],
-      "overall_reasoning": "<Concise summary of overall alignment. Maximum 40 words.>"
+      "overall_reasoning": "<Concise summary. Maximum 50 words.>"
     }
   ]
 }
 
-IMPORTANT:
-- The value of "JDskill" MUST be copied EXACTLY from the input. Do NOT rephrase or modify.
+CRITICAL RULES:
+- "JDskill" value MUST be copied EXACTLY from input. Do NOT rephrase or modify.
 - Always include JD_importance_score from input.
-- If no match exists: "matched_resume_skills": [] and explain why in overall_reasoning.
+- For ecosystem/conceptual matches, set impact_score_max to the matched ResumeSkill's score, scaled by match directness (direct = full score, ecosystem = 80% of score, conceptual = 60% of score).
 - Return strictly valid JSON only.`;
