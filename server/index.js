@@ -278,9 +278,53 @@ async function extractSkillsAndClassify(parsedProfile, progressCb) {
 }
 
 // ===========================
-// CALL 4: JD ↔ Resume Matching
+// Build LinkedIn context string for matching
 // ===========================
-async function matchProfileToJD(jdSkills, jdProfile, skillData, progressCb) {
+function buildLinkedInContext(parsedProfile) {
+  const parts = [];
+
+  if (parsedProfile.headline) {
+    parts.push(`HEADLINE: ${parsedProfile.headline}`);
+  }
+
+  if (parsedProfile.summary_text) {
+    parts.push(`SUMMARY: ${parsedProfile.summary_text}`);
+  }
+
+  if (parsedProfile.top_skills && parsedProfile.top_skills.length > 0) {
+    parts.push(`TOP SKILLS: ${parsedProfile.top_skills.join(", ")}`);
+  }
+
+  if (parsedProfile.all_technical_skills && parsedProfile.all_technical_skills.length > 0) {
+    parts.push(`ALL TECHNICAL SKILLS: ${parsedProfile.all_technical_skills.join(", ")}`);
+  }
+
+  if (parsedProfile.certifications && parsedProfile.certifications.length > 0) {
+    parts.push(`CERTIFICATIONS: ${parsedProfile.certifications.join(", ")}`);
+  }
+
+  if (parsedProfile.experience && parsedProfile.experience.length > 0) {
+    const expLines = parsedProfile.experience.map((exp) => {
+      let line = `${exp.designation || "Unknown Role"} at ${exp.company || "Unknown Company"}`;
+      if (exp.start_date) line += ` (${exp.start_date} - ${exp.end_date || "Present"})`;
+      if (exp.responsibilities && exp.responsibilities.length > 0) {
+        line += "\n  " + exp.responsibilities.join("\n  ");
+      }
+      if (exp.tech_stack_mentioned && exp.tech_stack_mentioned.length > 0) {
+        line += `\n  Tech: ${exp.tech_stack_mentioned.join(", ")}`;
+      }
+      return line;
+    });
+    parts.push(`EXPERIENCE:\n${expLines.join("\n\n")}`);
+  }
+
+  return parts.join("\n\n");
+}
+
+// ===========================
+// CALL 4: JD ↔ Resume Matching (with full context)
+// ===========================
+async function matchProfileToJD(jdSkills, jdProfile, jdFullText, skillData, linkedinContext, progressCb) {
   progressCb("Matching skills to JD requirements...");
 
   const jdInput = {
@@ -299,9 +343,20 @@ async function matchProfileToJD(jdSkills, jdProfile, skillData, progressCb) {
     })),
   };
 
+  // Build the rich context input
+  const userContent = `JD_SKILL_LIST:${JSON.stringify(jdInput)}
+
+RESUME_SKILL_LIST:${JSON.stringify(resumeInput)}
+
+JD_FULL_TEXT:
+${jdFullText || "(not available)"}
+
+LINKEDIN_EXPERIENCE_CONTEXT:
+${linkedinContext || "(not available)"}`;
+
   const raw = await callClaude(
     MATCHING_PROMPT,
-    `JD_SKILL_LIST:${JSON.stringify(jdInput)}\nRESUME_SKILL_LIST:${JSON.stringify(resumeInput)}`,
+    userContent,
     20000
   );
 
@@ -479,6 +534,9 @@ app.post(
 
           const interviewerName = skillData.name || parsedProfile.name || "Unknown";
 
+          // Build LinkedIn context string for richer matching
+          const linkedinContext = buildLinkedInContext(parsedProfile);
+
           // CALL 4: Match against each JD
           const jdResults = [];
           for (let j = 0; j < parsedJDs.length; j++) {
@@ -494,7 +552,9 @@ app.post(
             const matchResult = await matchProfileToJD(
               jd.jdSkills,
               jd.jdProfile,
+              jd.jdText || "",
               skillData,
+              linkedinContext,
               (msg) => send({ type: "progress", step: "matching", interviewer: i + 1, message: `[${intFile.originalname}] ${msg}` })
             );
 
@@ -638,10 +698,11 @@ app.post(
           const parsedProfile = await parseLinkedInProfile(fileContent, () => {});
           const skillData = await extractSkillsAndClassify(parsedProfile, () => {});
           const interviewerName = skillData.name || parsedProfile.name || "Unknown";
+          const linkedinContext = buildLinkedInContext(parsedProfile);
 
           const jdResults = [];
           for (const jd of parsedJDs) {
-            const matchResult = await matchProfileToJD(jd.jdSkills, jd.jdProfile, skillData, () => {});
+            const matchResult = await matchProfileToJD(jd.jdSkills, jd.jdProfile, jd.jdText || "", skillData, linkedinContext, () => {});
             const summary = generateSummary(matchResult, jd.parsed, interviewerName);
             jdResults.push({
               jdFilename: jd.filename,
