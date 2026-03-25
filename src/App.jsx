@@ -326,7 +326,13 @@ export default function App() {
       {/* JD Skills Breakdown */}
       {parsedJDs && results && (
         <div className="jd-parsed-summary">
-          <h3>JD Skills Breakdown</h3>
+          <div className="jd-summary-header">
+            <h3>JD Skills Breakdown</h3>
+            <div className="jd-legend">
+              <span className="jd-legend-item"><span className="jd-legend-dot must-have-dot" /> Must-have</span>
+              <span className="jd-legend-item"><span className="jd-legend-dot good-to-have-dot" /> Good-to-have</span>
+            </div>
+          </div>
           {parsedJDs.map((jd, i) => (
             <div key={i} style={{ marginBottom: i < parsedJDs.length - 1 ? 16 : 0 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>
