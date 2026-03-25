@@ -358,7 +358,46 @@ body {
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 20px 24px; margin-bottom: 24px;
 }
-.jd-parsed-summary h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+
+.jd-summary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.jd-summary-header h3 { font-size: 14px; font-weight: 600; margin-bottom: 0; }
+
+.jd-legend {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.jd-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.jd-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.jd-legend-dot.must-have-dot {
+  background: var(--intervue-purple);
+  border: 1px solid rgba(124, 58, 237, 0.5);
+}
+
+.jd-legend-dot.good-to-have-dot {
+  background: rgba(139, 149, 168, 0.3);
+  border: 1px solid rgba(139, 149, 168, 0.4);
+}
 
 .jd-parsed-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 
