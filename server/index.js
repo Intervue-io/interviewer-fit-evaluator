@@ -35,14 +35,20 @@ const upload = multer({
 const anthropic = new Anthropic();
 
 // ===========================
-// Claude API helper
+// Claude API helper (with prompt caching)
 // ===========================
 async function callClaude(systemPrompt, userContent, maxTokens = 16000) {
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-20250514",
     max_tokens: maxTokens,
     temperature: 0,
-    system: systemPrompt,
+    system: [
+      {
+        type: "text",
+        text: systemPrompt,
+        cache_control: { type: "ephemeral" },
+      },
+    ],
     messages: [{ role: "user", content: userContent }],
   });
 
@@ -53,14 +59,20 @@ async function callClaude(systemPrompt, userContent, maxTokens = 16000) {
 }
 
 // ===========================
-// Claude with PDF (vision)
+// Claude with PDF (vision) — with prompt caching
 // ===========================
 async function callClaudeWithPDF(systemPrompt, pdfBase64, userText, maxTokens = 16000) {
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-20250514",
     max_tokens: maxTokens,
     temperature: 0,
-    system: systemPrompt,
+    system: [
+      {
+        type: "text",
+        text: systemPrompt,
+        cache_control: { type: "ephemeral" },
+      },
+    ],
     messages: [
       {
         role: "user",
@@ -641,123 +653,8 @@ app.post(
 
 // Health check
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", version: "3.0.0", pipeline: "4-call LinkedIn-optimized" });
+  res.json({ status: "ok", version: "3.1.0", pipeline: "4-call LinkedIn-optimized + prompt caching" });
 });
-
-// ===========================
-// Non-streaming endpoint (Safari fallback)
-// Returns a single JSON response instead of SSE
-// ===========================
-app.post(
-  "/api/evaluate-sync",
-  upload.fields([
-    { name: "jds", maxCount: 5 },
-    { name: "interviewers", maxCount: 10 },
-  ]),
-  async (req, res) => {
-    try {
-      const jdFiles = req.files["jds"] || [];
-      const interviewerFiles = req.files["interviewers"] || [];
-
-      let preParsedJDs = [];
-      if (req.body.parsedJDs) {
-        try { preParsedJDs = JSON.parse(req.body.parsedJDs); } catch (e) {}
-      }
-
-      if (jdFiles.length === 0 && preParsedJDs.length === 0) {
-        return res.status(400).json({ error: "No JD files uploaded" });
-      }
-      if (interviewerFiles.length === 0) {
-        return res.status(400).json({ error: "No interviewer files uploaded" });
-      }
-
-      // Parse JDs
-      const parsedJDs = [...preParsedJDs];
-      const existingJDNames = new Set(preParsedJDs.map((jd) => jd.filename));
-
-      for (const jdFile of jdFiles) {
-        if (existingJDNames.has(jdFile.originalname)) continue;
-        const jdContent = await extractContent(jdFile);
-        const { parsed, jdSkills, jdText } = await parseJD(jdContent);
-        const jdProfile = inferJDProfile(jdSkills);
-        parsedJDs.push({
-          filename: jdFile.originalname,
-          jdText: jdContent.type === "text" ? jdContent.content : "(PDF)",
-          parsed, jdSkills, jdProfile,
-        });
-        existingJDNames.add(jdFile.originalname);
-      }
-
-      // Process interviewers
-      const allResults = [];
-
-      for (const intFile of interviewerFiles) {
-        const startTime = Date.now();
-        try {
-          const fileContent = await extractContent(intFile);
-          const parsedProfile = await parseLinkedInProfile(fileContent, () => {});
-          const skillData = await extractSkillsAndClassify(parsedProfile, () => {});
-          const interviewerName = skillData.name || parsedProfile.name || "Unknown";
-          const linkedinContext = buildLinkedInContext(parsedProfile);
-
-          const jdResults = [];
-          for (const jd of parsedJDs) {
-            const matchResult = await matchProfileToJD(jd.jdSkills, jd.jdProfile, jd.jdText || "", skillData, linkedinContext, () => {});
-            const summary = generateSummary(matchResult, jd.parsed, interviewerName);
-            jdResults.push({
-              jdFilename: jd.filename,
-              jdProfile: jd.jdProfile,
-              mustHaveSkills: jd.parsed.must_have || [],
-              goodToHaveSkills: jd.parsed.good_to_have || [],
-              overallPercentage: matchResult.overallPercentage,
-              verdict: matchResult.verdict,
-              summary,
-              totalScore: matchResult.totalScore,
-              totalImportance: matchResult.totalImportance,
-            });
-          }
-
-          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-          allResults.push({
-            interviewerFile: intFile.originalname,
-            interviewerName,
-            primaryProfile: skillData.primary_profile,
-            secondaryProfile: skillData.secondary_profile,
-            profileConfidence: skillData.profile_confidence,
-            profiles: [skillData.primary_profile, skillData.secondary_profile].filter(Boolean),
-            totalExperienceYears: skillData.total_experience_years,
-            jdResults,
-            processingTime: `${elapsed}s`,
-          });
-        } catch (err) {
-          console.error(`Error processing ${intFile.originalname}:`, err);
-          allResults.push({
-            interviewerFile: intFile.originalname,
-            interviewerName: "Error",
-            profiles: [],
-            jdResults: [],
-            error: err.message,
-          });
-        }
-      }
-
-      res.json({
-        results: allResults,
-        parsedJDs: parsedJDs.map((jd) => ({
-          filename: jd.filename,
-          jdProfile: jd.jdProfile,
-          mustHaveCount: (jd.parsed.must_have || []).length,
-          goodToHaveCount: (jd.parsed.good_to_have || []).length,
-          parsed: jd.parsed,
-          jdSkills: jd.jdSkills,
-        })),
-      });
-    } catch (err) {
-      console.error("Evaluation error:", err);
-      res.status(500).json({ error: err.message });
-    }
-  }
-);
 
 // Serve static files in production
 const distPath = path.join(__dirname, "..", "dist");
@@ -770,5 +667,5 @@ if (fs.existsSync(distPath)) {
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`Interviewer Fit Evaluator v3 — LinkedIn-optimized pipeline — port ${PORT}`);
+  console.log(`Interviewer Fit Evaluator v3.1 — LinkedIn-optimized pipeline + prompt caching — port ${PORT}`);
 });
