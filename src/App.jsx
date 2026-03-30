@@ -103,72 +103,42 @@ export default function App() {
       }
     }
 
-    // Detect Safari (uses sync endpoint to avoid SSE issues)
-    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-
     try {
-      if (isSafari) {
-        // Safari: use non-streaming JSON endpoint
-        addLog("Using Safari-compatible mode...");
-        const response = await fetch("/api/evaluate-sync", { method: "POST", body: formData });
+      // SSE streaming for real-time progress
+      const response = await fetch("/api/evaluate", { method: "POST", body: formData });
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({ error: "Server error" }));
-          addLog(`Error: ${errData.error}`);
-        } else {
-          const data = await response.json();
-          if (data.results) {
-            for (const result of data.results) {
-              if (result.error) {
-                addLog(`✗ Error: ${result.interviewerFile} — ${result.error}`);
-              } else {
-                addLog(`✓ ${result.interviewerName} — ${result.jdResults.map((r) => `${r.verdict} ${r.overallPercentage}%`).join(", ")} [${result.processingTime}]`);
-              }
-              setStreamResults((prev) => [...prev, result]);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          if (buffer.trim()) {
+            const remaining = buffer.split("\n");
+            for (const line of remaining) {
+              if (!line.startsWith("data: ")) continue;
+              const jsonStr = line.slice(6).trim();
+              if (!jsonStr) continue;
+              try { processEvent(JSON.parse(jsonStr)); } catch (e) {}
             }
-            setResults(data.results);
-            setParsedJDs(data.parsedJDs);
-            setHasEvaluated(true);
-            addLog("Evaluation complete.");
           }
+          break;
         }
-      } else {
-        // Chrome/Firefox/Edge: use SSE streaming for real-time progress
-        const response = await fetch("/api/evaluate", { method: "POST", body: formData });
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            if (buffer.trim()) {
-              const remaining = buffer.split("\n");
-              for (const line of remaining) {
-                if (!line.startsWith("data: ")) continue;
-                const jsonStr = line.slice(6).trim();
-                if (!jsonStr) continue;
-                try { processEvent(JSON.parse(jsonStr)); } catch (e) {}
-              }
-            }
-            break;
-          }
+        buffer += decoder.decode(value, { stream: true });
 
-          buffer += decoder.decode(value, { stream: true });
+        const eventBoundary = buffer.lastIndexOf("\n\n");
+        if (eventBoundary === -1) continue;
 
-          const eventBoundary = buffer.lastIndexOf("\n\n");
-          if (eventBoundary === -1) continue;
+        const completePart = buffer.substring(0, eventBoundary);
+        buffer = buffer.substring(eventBoundary + 2);
 
-          const completePart = buffer.substring(0, eventBoundary);
-          buffer = buffer.substring(eventBoundary + 2);
-
-          const lines = completePart.split("\n");
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            const jsonStr = line.slice(6).trim();
-            if (!jsonStr) continue;
-            try { processEvent(JSON.parse(jsonStr)); } catch (e) {}
-          }
+        const lines = completePart.split("\n");
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const jsonStr = line.slice(6).trim();
+          if (!jsonStr) continue;
+          try { processEvent(JSON.parse(jsonStr)); } catch (e) {}
         }
       }
     } catch (err) {
